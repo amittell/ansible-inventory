@@ -43,11 +43,7 @@ DOCUMENTATION = r'''
         fields:
             description: Comma seperated string providing additional table columns to add as host vars to each inventory host.
             type: list
-            default: []
-        sn_groups:
-            description: Comma seperated string providing additional table columns to use as groups. Groups can overlap with fields
-            type: list
-            default: []
+            default: [host_name,fqdn,ip_address,sys_class_name]
         selection_order:
             description: Comma seperated string providing ability to define selection preference order.
             type: list
@@ -67,18 +63,50 @@ plugin: now
 instance: demo.service-now.com
 username: admin
 password: password
+keyed_groups:
+  - key: sn_sys_class_name | lower
+    prefix: ''
+    separator: ''
+
+plugin: now
+instance: demo.service-now.com
+username: admin
+password: password
+fields: [name,host_name,fqdn,ip_address,sys_class_name, install_status, classification,vendor]
+keyed_groups:
+  - key: sn_classification | lower
+    prefix: 'env'
+  - key: sn_vendor | lower
+    prefix: ''
+    separator: ''
+  - key: sn_sys_class_name | lower
+    prefix: ''
+    separator: ''
+  - key: sn_install_status | lower
+    prefix: 'status'
+
+plugin: now
+instance: demo.service-now.com
+username: admin
+password: password
+fields:
+  - name
+  - sys_tags
+compose:
+  sn_tags: sn_sys_tags.replace(" ", "").split(',')
+  ansible_host: sn_ip_address
+keyed_groups:
+  - key: sn_tags | lower
+    prefix: 'tag'
 '''
 
-from ansible.plugins.inventory import BaseInventoryPlugin, Constructable, to_safe_group_name, Cacheable
+from ansible.plugins.inventory import BaseInventoryPlugin, Constructable, Cacheable
 from ansible.errors import AnsibleError, AnsibleParserError
 try:
     import requests
-    HAS_REQUESTS = True
-except ImportError:
-    HAS_REQUESTS = False
-if not HAS_REQUESTS:
-    raise AnsibleParserError('Please install "requests" Python module as this is required'
-                             ' for ServiceNow dynamic inventory plugin.')
+    HAS_REQUESTS = True 
+except ImportError: 
+    HAS_REQUESTS = False 
 import sys
 
 
@@ -99,9 +127,9 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
         self.url = "https://%s/%s" % (self.get_option('instance'), path)
         url = self.url
         results = []
-
+        
         if not self.update_cache:
-            try:
+            try:    
                 results = self._cache[self.cache_key][self.url]
             except KeyError:
                 pass
@@ -136,30 +164,26 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
     def parse(self, inventory, loader, path,
               cache=True):  # Plugin interface (2)
         super(InventoryModule, self).parse(inventory, loader, path)
-        self._read_config_data(path)
-        self.load_cache_plugin()
 
+        if not HAS_REQUESTS:
+            raise AnsibleParserError('Please install "requests" Python module as this is required'
+                                     ' for ServiceNow dynamic inventory plugin.')
+
+        self._read_config_data(path)
         self.cache_key = self.get_cache_key(path)
 
         self.use_cache = self.get_option('cache') and cache
         self.update_cache = self.get_option('cache') and not cache
 
         selection = self.get_option('selection_order')
-        groups = self.get_option('sn_groups')
         fields = self.get_option('fields')
         table = self.get_option('table')
         filter_results = self.get_option('filter_results')
 
-        base_fields = [
-            u'name', u'host_name', u'fqdn', u'ip_address', u'sys_class_name'
-        ]
-        base_groups = [u'sys_class_name']
-        groups = base_groups + groups
         options = "?sysparm_exclude_reference_link=true&sysparm_display_value=true"
 
-        columns = list(set(base_fields + base_groups + fields + groups))
         path = '/api/now/table/' + table + options + \
-            "&sysparm_fields=" + ','.join(columns) + \
+            "&sysparm_fields=" + ','.join(fields) + \
             "&sysparm_query=" + filter_results
 
         content = self.invoke('GET', path, None)
@@ -180,21 +204,6 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
 
             for k in record.keys():
                 self.inventory.set_variable(host_name, 'sn_%s' % k, record[k])
-
-            for k in groups:
-                if k == "sys_tags" and record[k] is not None:
-                    for y in [x.strip() for x in record[k].split(',')]:
-                        group_name = y.lower()
-                        group_name = to_safe_group_name(
-                            group_name.replace(" ", "_"))
-                        group_name = self.inventory.add_group(group_name)
-                        self.inventory.add_child(host_name, group_name)
-                else:
-                    group_name = record[k].lower()
-                    group_name = to_safe_group_name(
-                        group_name.replace(" ", "_"))
-                    group_name = self.inventory.add_group(group_name)
-                    self.inventory.add_child(group_name, host_name)
 
             self._set_composite_vars(
                 self.get_option('compose'),
