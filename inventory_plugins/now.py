@@ -104,9 +104,9 @@ from ansible.plugins.inventory import BaseInventoryPlugin, Constructable, Cachea
 from ansible.errors import AnsibleError, AnsibleParserError
 try:
     import requests
-    HAS_REQUESTS = True 
-except ImportError: 
-    HAS_REQUESTS = False 
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
 import sys
 
 
@@ -127,9 +127,9 @@ class InventoryModule(BaseInventoryPlugin, Constructable, Cacheable):
         self.url = "https://%s/%s" % (self.get_option('instance'), path)
         url = self.url
         results = []
-        
+
         if not self.update_cache:
-            try:    
+            try:
                 results = self._cache[self.cache_key][self.url]
             except KeyError:
                 pass
